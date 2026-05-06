@@ -7,9 +7,12 @@ import os
 import shutil
 import json
 import subprocess
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 LIBRARY_DIR = Path.home() / "Documents/FS25ModLibrary"
+LIBRARY_INDEX = LIBRARY_DIR / "library_index.json"
 PROFILES_DIR = Path.home() / "Documents/FS25ModProfiles"
 CONFIG_FILE = Path.home() / ".config/fs25-mod-switcher/config.json"
 
@@ -55,6 +58,88 @@ def save_config(config):
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
+
+
+# ── mod metadata ─────────────────────────────────────────────────────────────
+
+def read_mod_metadata(zip_path):
+    """Peek inside a mod zip and parse modDesc.xml. Returns dict or None."""
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            with z.open('modDesc.xml') as f:
+                root = ET.parse(f).getroot()
+
+            title_el = root.find('.//title/en')
+            title = (title_el.text or '').strip() if title_el is not None else ''
+
+            author_el = root.find('author')
+            author = (author_el.text or '').strip() if author_el is not None else ''
+
+            version_el = root.find('version')
+            version = (version_el.text or '').strip() if version_el is not None else ''
+
+            is_map = root.find('.//maps/map') is not None
+
+            deps = [d.text.strip() for d in root.findall('.//dependencies/dependency')
+                    if d.text and d.text.strip()]
+
+            return {'title': title, 'author': author, 'version': version,
+                    'isMap': is_map, 'dependencies': deps}
+    except Exception:
+        return None
+
+
+def load_library_index():
+    if LIBRARY_INDEX.exists():
+        with open(LIBRARY_INDEX) as f:
+            return json.load(f)
+    return {}
+
+
+def save_library_index(index):
+    with open(LIBRARY_INDEX, 'w') as f:
+        json.dump(index, f, indent=2)
+
+
+def scan_library_for_metadata():
+    """Scan any library mods not yet in the index and add their metadata."""
+    index = load_library_index()
+    changed = False
+    for mod_file in LIBRARY_DIR.iterdir():
+        if mod_file.suffix.lower() != '.zip':
+            continue
+        if mod_file.name not in index:
+            meta = read_mod_metadata(mod_file)
+            index[mod_file.name] = meta or {}
+            changed = True
+    if changed:
+        save_library_index(index)
+    return index
+
+
+def index_mod(mod_name):
+    """Read and store metadata for a single newly imported mod."""
+    index = load_library_index()
+    if mod_name not in index:
+        meta = read_mod_metadata(LIBRARY_DIR / mod_name)
+        index[mod_name] = meta or {}
+        save_library_index(index)
+
+
+def resolve_dependencies(mod_name, index):
+    """Return list of zip filenames that are dependencies of mod_name and exist in library."""
+    meta = index.get(mod_name, {})
+    deps = meta.get('dependencies', [])
+    library_mods = set(get_library_mods())
+    found = []
+    missing = []
+    for dep in deps:
+        zip_name = dep if dep.endswith('.zip') else dep + '.zip'
+        if zip_name in library_mods:
+            found.append(zip_name)
+        else:
+            missing.append(dep)
+    return found, missing
 
 
 # ── data helpers ──────────────────────────────────────────────────────────────
@@ -489,13 +574,37 @@ class ModSwitcherWindow(Gtk.Window):
         self.mod_list_box.pack_start(lbl, False, False, 0)
 
     def _add_mod_row(self, mod_name, active, profile_name):
-        cb = Gtk.CheckButton(label=mod_name)
+        index = load_library_index()
+        meta = index.get(mod_name, {})
+        is_map = meta.get('isMap', False)
+        deps = meta.get('dependencies', [])
+        title = meta.get('title', '')
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.set_margin_start(8)
+        row.set_margin_top(3)
+        row.set_margin_bottom(3)
+
+        prefix = '🗺 ' if is_map else ''
+        label = f"{prefix}{mod_name}"
+        cb = Gtk.CheckButton(label=label)
         cb.set_active(active)
-        cb.set_margin_start(8)
-        cb.set_margin_top(3)
-        cb.set_margin_bottom(3)
         cb.connect("toggled", self._on_mod_toggled, profile_name, mod_name)
-        self.mod_list_box.pack_start(cb, False, False, 0)
+        row.pack_start(cb, True, True, 0)
+
+        if title:
+            title_lbl = Gtk.Label(label=title)
+            title_lbl.get_style_context().add_class("dim-label")
+            title_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            title_lbl.set_max_width_chars(30)
+            row.pack_start(title_lbl, False, False, 0)
+
+        if deps:
+            dep_lbl = Gtk.Label(label=f"  {len(deps)} deps")
+            dep_lbl.get_style_context().add_class("dim-label")
+            row.pack_start(dep_lbl, False, False, 0)
+
+        self.mod_list_box.pack_start(row, False, False, 0)
 
     # ── handlers ───────────────────────────────────────────────────────────────
 
@@ -526,11 +635,37 @@ class ModSwitcherWindow(Gtk.Window):
                 link.symlink_to(LIBRARY_DIR / mod_name)
             if mod_name not in self._toggled_mods:
                 self._toggled_mods.append(mod_name)
+
+            # Auto-add dependencies
+            index = load_library_index()
+            found_deps, missing_deps = resolve_dependencies(mod_name, index)
+            profile_mods = get_profile_mods(profile_name)
+            auto_added = []
+            for dep in found_deps:
+                if dep not in profile_mods:
+                    dep_link = PROFILES_DIR / profile_name / dep
+                    if not dep_link.exists():
+                        dep_link.symlink_to(LIBRARY_DIR / dep)
+                    if dep not in self._toggled_mods:
+                        self._toggled_mods.append(dep)
+                    auto_added.append(dep)
+
+            if auto_added or missing_deps:
+                msg_parts = []
+                if auto_added:
+                    msg_parts.append(f"Auto-added {len(auto_added)} required mod{'s' if len(auto_added) != 1 else ''}:\n" +
+                                     '\n'.join(f"  • {d}" for d in auto_added))
+                if missing_deps:
+                    msg_parts.append(f"Missing from library ({len(missing_deps)}):\n" +
+                                     '\n'.join(f"  • {d}" for d in missing_deps))
+                self._msg("Dependencies", '\n\n'.join(msg_parts),
+                          Gtk.MessageType.WARNING if missing_deps else Gtk.MessageType.INFO)
         else:
             if link.is_symlink():
                 link.unlink()
             if mod_name in self._toggled_mods:
                 self._toggled_mods.remove(mod_name)
+
         row = self.profile_list.get_selected_row()
         if row:
             self._refresh_mod_panel(row.profile_name)
@@ -780,6 +915,7 @@ class ModSwitcherWindow(Gtk.Window):
                 skipped += 1
             else:
                 shutil.copy2(str(src), str(dest))
+                index_mod(src.name)
                 imported += 1
         return imported, skipped
 
@@ -826,6 +962,7 @@ def main():
         save_config(config)
 
     first_run_setup()
+    scan_library_for_metadata()
 
     win = ModSwitcherWindow()
     win.connect("destroy", Gtk.main_quit)
