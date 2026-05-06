@@ -661,6 +661,37 @@ class ModSwitcherWindow(Gtk.Window):
                 self._msg("Dependencies", '\n\n'.join(msg_parts),
                           Gtk.MessageType.WARNING if missing_deps else Gtk.MessageType.INFO)
         else:
+            # Check if any other mod in this profile declares this as a dependency
+            index = load_library_index()
+            profile_mods = get_profile_mods(profile_name)
+            mod_stem = mod_name[:-4] if mod_name.endswith('.zip') else mod_name
+            needed_by = [
+                m for m in profile_mods
+                if mod_stem in index.get(m, {}).get('dependencies', [])
+                and m != mod_name
+            ]
+
+            if needed_by:
+                dialog = Gtk.MessageDialog(
+                    parent=self, modal=True,
+                    message_type=Gtk.MessageType.WARNING,
+                    buttons=Gtk.ButtonsType.YES_NO,
+                    text=f'"{mod_name}" is required by:'
+                )
+                dialog.format_secondary_text(
+                    '\n'.join(f'  • {m}' for m in needed_by) +
+                    '\n\nRemove it anyway?'
+                )
+                response = dialog.run()
+                dialog.destroy()
+
+                if response != Gtk.ResponseType.YES:
+                    # Revert the checkbox without triggering another toggle
+                    cb.handler_block_by_func(self._on_mod_toggled)
+                    cb.set_active(True)
+                    cb.handler_unblock_by_func(self._on_mod_toggled)
+                    return
+
             if link.is_symlink():
                 link.unlink()
             if mod_name in self._toggled_mods:
