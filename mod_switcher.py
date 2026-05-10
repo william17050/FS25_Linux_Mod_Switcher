@@ -470,6 +470,10 @@ class ModSwitcherWindow(Gtk.Window):
         new_btn.connect("clicked", self._on_new_profile)
         btn_box.pack_start(new_btn, False, False, 0)
 
+        clone_btn = Gtk.Button(label="Clone")
+        clone_btn.connect("clicked", self._on_clone)
+        btn_box.pack_start(clone_btn, False, False, 0)
+
         rename_btn = Gtk.Button(label="Rename")
         rename_btn.connect("clicked", self._on_rename)
         btn_box.pack_start(rename_btn, False, False, 0)
@@ -736,6 +740,57 @@ class ModSwitcherWindow(Gtk.Window):
 
         for row in self.profile_list.get_children():
             if row.profile_name == name:
+                self.profile_list.select_row(row)
+                break
+
+    def _on_clone(self, _btn):
+        row = self.profile_list.get_selected_row()
+        if not row:
+            self._msg("Select a profile", "Click a profile to clone first.")
+            return
+        source = row.profile_name
+
+        dialog = Gtk.Dialog(title="Clone Profile", parent=self, modal=True)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                           Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        dialog.set_default_size(320, -1)
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(14)
+        box.set_margin_bottom(14)
+        box.set_margin_start(14)
+        box.set_margin_end(14)
+        box.pack_start(Gtk.Label(label=f'Clone "{source}" as:', halign=Gtk.Align.START), False, False, 0)
+        entry = Gtk.Entry()
+        entry.set_text(f"{source} (copy)")
+        entry.select_region(0, -1)
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+        box.show_all()
+
+        response = dialog.run()
+        new_name = entry.get_text().strip()
+        dialog.destroy()
+
+        if response != Gtk.ResponseType.OK or not new_name:
+            return
+        if (PROFILES_DIR / new_name).exists():
+            self._msg("Already exists", f'A profile named "{new_name}" already exists.')
+            return
+
+        # Copy all symlinks from source to new profile
+        new_dir = PROFILES_DIR / new_name
+        new_dir.mkdir()
+        for link in (PROFILES_DIR / source).iterdir():
+            if link.is_symlink():
+                (new_dir / link.name).symlink_to(LIBRARY_DIR / link.name)
+
+        self._refresh_profiles()
+
+        # Select the new profile immediately
+        for row in self.profile_list.get_children():
+            if row.profile_name == new_name:
                 self.profile_list.select_row(row)
                 break
 
