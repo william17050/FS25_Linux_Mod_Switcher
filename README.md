@@ -14,6 +14,10 @@ Most mod switchers work by keeping multiple full copies of your mods — one per
 - **Import Folder** — point at a downloaded mod pack folder and assign all of it to a profile in one click
 - **Import Files** — add individual mod zips to the library
 - **Smart mod list** — mods in your profile shown at the top, rest of library below; newly added mods appear at the bottom of the active section so you can see what you just changed
+- **Clone profile** — duplicate an existing profile as a starting point, then add or remove mods from the copy
+- **Mod metadata** — reads `modDesc.xml` inside each zip to extract title, author, version, and dependencies; map mods are marked with a 🗺 icon
+- **Auto dependency detection** — ticking a mod automatically ticks its declared dependencies if they are in your library; warns about any that are missing
+- **Dependency safety warning** — warns you if you try to remove a mod that another mod in the profile depends on
 - **Auto-detection** — automatically finds your FS25 mods folder across all common Steam and Proton paths
 - **Settings** — if auto-detection misses it, browse to your mods folder manually and save it
 - **FS25 running guard** — warns you if the game is open before switching profiles
@@ -132,6 +136,10 @@ If you already had a mods folder, your mods are already in the library after fir
 
 > **Note:** FS25 must be closed before switching. The app will warn you if it detects the game is running.
 
+### Cloning a profile
+
+Have a profile you want to use as a base for a new one? Select it and click **Clone**. Enter a name for the copy — it opens immediately with the same mods already ticked, ready to adjust. Great for creating a "Template" profile with your core mods and cloning it for each new map.
+
 ### Changing your mods folder path
 
 Click **⚙ Settings** in the top-left to browse to a different mods folder. Useful if Steam is installed in a non-standard location or if you reinstall the game.
@@ -148,6 +156,7 @@ Click **⚙ Settings** in the top-left to browse to a different mods folder. Use
 | Import individual mods | **Import Files** → select zip files |
 | Add a mod to a profile | Select profile → tick the mod in the right panel |
 | Remove a mod from a profile | Select profile → untick the mod in the right panel |
+| Clone an existing profile | Select profile → **Clone** → enter new name |
 | Change the FS25 mods folder | **⚙ Settings** |
 
 ---
@@ -177,8 +186,6 @@ Try installing GTK3 development libraries first:
 ## Contributing
 
 Pull requests welcome. If you find a bug or have a feature idea, open an issue.
-
-Planned future feature: automatic mod dependency detection by reading `modDesc.xml` from inside mod zips — so ticking a map mod automatically ticks its required dependencies.
 
 ---
 
